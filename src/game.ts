@@ -1798,7 +1798,7 @@ export class WordBreaker {
 
     // 已学单词数
     if (this.learnedWords.length > 0) {
-      const learnBlock = this.renderer.getBlock(`已��� ${this.learnedWords.length} 词`, FONTS.hudSmall, 18)
+      const learnBlock = this.renderer.getBlock(`已学 ${this.learnedWords.length} 词`, FONTS.hudSmall, 18)
       this.renderer.drawBlock(ctx, learnBlock, this.view.width / 2, y + 26, {
         color: COLORS.correct,
         align: 'center',

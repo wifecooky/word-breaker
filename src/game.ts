@@ -325,10 +325,20 @@ export class WordBreaker {
         if (this.mode === 'playing') this.paused = !this.paused
       }
       if (e.key === 'm' || e.key === 'M') sfx.toggleMute()
+      if (e.key === 'f' || e.key === 'F') this.toggleFullscreen()
     })
 
     window.addEventListener('keyup', (e) => this.keys.delete(e.key))
     window.addEventListener('resize', () => this.resize())
+    document.addEventListener('fullscreenchange', () => this.resize())
+  }
+
+  private toggleFullscreen(): void {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      this.canvas.parentElement?.requestFullscreen()
+    }
   }
 
   private handleAction(): void {
@@ -1982,7 +1992,7 @@ export class WordBreaker {
     })
 
     // 操作说明
-    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', 'M 切换音效 · P 暂停 · 击碎单词可听发音']
+    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', 'M 音效 · P 暂停 · F 全屏 · 击碎单词可听发音']
     for (let i = 0; i < helpTexts.length; i++) {
       const hAlpha = easeOutCubic(clamp((this.gameTime - 1 - i * 0.1) / 0.3, 0, 1))
       const hBlock = this.renderer.getBlock(helpTexts[i]!, FONTS.hint, 18)

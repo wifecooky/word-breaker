@@ -2322,14 +2322,17 @@ export class WordBreaker {
     const labelBlock = this.renderer.getBlock(label, FONTS.hudSmall, 16)
     this.renderer.drawBlock(ctx, labelBlock, x + 20, y, { color: COLORS.frameBright, align: 'left', alpha: 0.9 })
 
+    // 用 box-drawing '─' 字符拼分割线，与主边框风格统一
     ctx.save()
     ctx.globalAlpha = 0.3
-    ctx.strokeStyle = COLORS.frameBright
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(x + 20 + labelBlock.width + 12, y + 8)
-    ctx.lineTo(x + w - 20, y + 8)
-    ctx.stroke()
+    ctx.font = FONTS.border
+    ctx.fillStyle = COLORS.frameBright
+    ctx.textBaseline = 'top'
+    const lineStart = x + 20 + labelBlock.width + 12
+    const lineEnd = x + w - 20
+    for (let lx = lineStart; lx < lineEnd; lx += 14) {
+      ctx.fillText('─', lx, y)
+    }
     ctx.restore()
   }
 
@@ -2350,7 +2353,7 @@ export class WordBreaker {
     ctx.save()
     ctx.fillStyle = 'rgba(8, 14, 28, 0.95)'
     ctx.beginPath()
-    ctx.roundRect(px, py, pw, ph, 4)
+    ctx.roundRect(px, py, pw, ph, 0)
     ctx.fill()
     ctx.restore()
 

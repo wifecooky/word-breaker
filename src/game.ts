@@ -248,6 +248,9 @@ export class WordBreaker {
   // 文字墙
   private wallPrepared: ReturnType<typeof this.renderer.prepareForWall> | null = null
 
+  // 暂停
+  private paused = false
+
   // 动画时间
   private lastTime = 0
   private gameTime = 0
@@ -314,7 +317,13 @@ export class WordBreaker {
 
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.key)
-      if (e.key === ' ' || e.key === 'Enter') this.handleAction()
+      if (e.key === ' ' || e.key === 'Enter') {
+        if (this.paused) { this.paused = false; return }
+        this.handleAction()
+      }
+      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (this.mode === 'playing') this.paused = !this.paused
+      }
       if (e.key === 'm' || e.key === 'M') sfx.toggleMute()
     })
 
@@ -365,8 +374,13 @@ export class WordBreaker {
     // 难度递增：每关球速 +8%
     this.normalBallSpeed = BALL_SPEED * (1 + levelIndex * 0.08)
 
-    const words = LEVELS[levelIndex % LEVELS.length]!
-    this.levelWords = [...words]
+    const words = [...LEVELS[levelIndex % LEVELS.length]!]
+    // Fisher-Yates 洗牌，每次游戏词序不同
+    for (let i = words.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [words[i], words[j]] = [words[j]!, words[i]!]
+    }
+    this.levelWords = words
     this.buildBricks(words)
 
     // 进入 intro 动画
@@ -456,9 +470,11 @@ export class WordBreaker {
   private tick = (now: number): void => {
     const dt = Math.min((now - this.lastTime) / 1000, 0.05)
     this.lastTime = now
-    this.gameTime += dt
 
-    this.update(dt)
+    if (!this.paused) {
+      this.gameTime += dt
+      this.update(dt)
+    }
     this.draw()
 
     requestAnimationFrame(this.tick)
@@ -1110,8 +1126,42 @@ export class WordBreaker {
       this.drawWinScreen()
     }
 
+    // 暂停遮罩
+    if (this.paused) this.drawPauseOverlay()
+
     // 竖屏提示
     this.drawPortraitHint()
+
+    ctx.restore()
+  }
+
+  // ── 暂停遮罩 ────────────────────────────────────
+  private drawPauseOverlay(): void {
+    const ctx = this.ctx
+    const cx = this.view.width / 2
+    const cy = this.view.height / 2
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(4, 7, 13, 0.7)'
+    ctx.fillRect(0, 0, this.view.width, this.view.height)
+
+    // 暂停图标 ❚❚
+    ctx.font = `700 72px ${FM}`
+    ctx.fillStyle = COLORS.title
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.shadowColor = COLORS.title
+    ctx.shadowBlur = 20
+    ctx.fillText('❚❚', cx, cy - 30)
+
+    ctx.shadowBlur = 0
+    ctx.font = `700 28px ${FC}`
+    ctx.fillStyle = COLORS.panel
+    ctx.fillText('暂停', cx, cy + 30)
+
+    ctx.font = `400 18px ${FC}`
+    ctx.fillStyle = COLORS.hud
+    ctx.fillText('按 P / Esc / Space 继续', cx, cy + 68)
 
     ctx.restore()
   }
@@ -1932,7 +1982,7 @@ export class WordBreaker {
     })
 
     // 操作说明
-    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', '按 M 键切换音效 · 击碎单词可听发音']
+    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', 'M 切换音效 · P 暂停 · 击碎单词可听发音']
     for (let i = 0; i < helpTexts.length; i++) {
       const hAlpha = easeOutCubic(clamp((this.gameTime - 1 - i * 0.1) / 0.3, 0, 1))
       const hBlock = this.renderer.getBlock(helpTexts[i]!, FONTS.hint, 18)

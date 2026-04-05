@@ -2210,36 +2210,22 @@ export class WordBreaker {
       alpha: subAlpha * 0.85,
     })
 
-    // 球演示动画 — 弹跳 + 拖尾 + 碰壁火花
+    // 球演示弧线 + 拖尾 + 弧顶火花
     if (this.gameTime > 0.3) {
-      const gt = this.gameTime - 0.3
-      const demoLeft = cx - 280, demoRight = cx + 280
-      const demoTop = cy + 40, demoBottom = cy + 160
-
-      // 球位置：用两个不同频率的三角波模拟弹跳
-      const xPeriod = 2.4
-      const yPeriod = 1.1
-      const xPhase = (gt / xPeriod) % 1
-      const yPhase = (gt / yPeriod) % 1
-      // 三角波 0→1→0
-      const xWave = 1 - Math.abs(xPhase * 2 - 1)
-      const yWave = 1 - Math.abs(yPhase * 2 - 1)
-      const ballX = lerp(demoLeft, demoRight, xWave)
-      const ballY = lerp(demoTop, demoBottom, easeOutCubic(yWave))
+      const t = ((this.gameTime - 0.3) * 0.5) % 1
+      const ballX = lerp(cx - 280, cx + 280, t)
+      const ballArc = Math.abs(Math.sin(t * Math.PI * 2.1 + 0.2))
+      const ballY = cy + 60 + (1 - ballArc) * 100
 
       // 拖尾（6个渐隐残影）
       for (let i = 5; i >= 0; i--) {
-        const lag = i * 0.03
-        const lagGt = gt - lag
-        if (lagGt < 0) continue
-        const lxP = ((lagGt / xPeriod) % 1)
-        const lyP = ((lagGt / yPeriod) % 1)
-        const lxW = 1 - Math.abs(lxP * 2 - 1)
-        const lyW = 1 - Math.abs(lyP * 2 - 1)
-        const lx = lerp(demoLeft, demoRight, lxW)
-        const ly = lerp(demoTop, demoBottom, easeOutCubic(lyW))
-        const trailAlpha = (1 - i / 6) * 0.25
-        const trailSize = 18 - i * 2
+        const lt = ((this.gameTime - 0.3 - i * 0.04) * 0.5) % 1
+        if (lt < 0) continue
+        const lx = lerp(cx - 280, cx + 280, lt)
+        const la = Math.abs(Math.sin(lt * Math.PI * 2.1 + 0.2))
+        const ly = cy + 60 + (1 - la) * 100
+        const trailAlpha = (1 - i / 6) * 0.2
+        const trailSize = 16 - i * 2
 
         ctx.save()
         ctx.globalAlpha = trailAlpha
@@ -2252,29 +2238,27 @@ export class WordBreaker {
         ctx.restore()
       }
 
-      // 球本体（发光）
+      // 球本体
       const ballBlock = this.renderer.getBlock('●', FONTS.ball, 22)
       this.renderer.drawBlock(ctx, ballBlock, ballX, ballY - 10, {
         color: COLORS.ball,
         align: 'center',
-        alpha: 0.75,
+        alpha: 0.7,
         shadow: true,
         shadowColor: COLORS.ball,
         shadowBlur: 18,
       })
 
-      // 碰壁火花 — x 或 y 接近边界时画火花粒子
-      const xEdgeDist = Math.min(ballX - demoLeft, demoRight - ballX)
-      const yEdgeDist = Math.min(ballY - demoTop, demoBottom - ballY)
-      if (xEdgeDist < 20 || yEdgeDist < 20) {
-        const sparkCount = 3
-        for (let i = 0; i < sparkCount; i++) {
-          const angle = (gt * 12 + i * 2.1) % (Math.PI * 2)
-          const dist = 8 + Math.sin(gt * 20 + i * 3) * 6
+      // 弧顶火花 — 球在弧线高点时闪几颗星
+      if (ballArc > 0.85) {
+        const gt = this.gameTime
+        for (let i = 0; i < 3; i++) {
+          const angle = (gt * 8 + i * 2.1) % (Math.PI * 2)
+          const dist = 10 + Math.sin(gt * 10 + i * 3) * 5
           const sx = ballX + Math.cos(angle) * dist
-          const sy = ballY + Math.sin(angle) * dist
+          const sy = ballY - 10 + Math.sin(angle) * dist
           ctx.save()
-          ctx.globalAlpha = 0.5 + Math.sin(gt * 15 + i) * 0.3
+          ctx.globalAlpha = 0.4 + Math.sin(gt * 12 + i) * 0.3
           ctx.fillStyle = COLORS.spark
           ctx.shadowColor = COLORS.spark
           ctx.shadowBlur = 8

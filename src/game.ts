@@ -149,6 +149,28 @@ interface WakeHole {
 
 type GameMode = 'title' | 'intro' | 'playing' | 'clearing' | 'review' | 'gameover' | 'win'
 
+// ── 道具系统 ─────────────────────────────────────
+type PowerUpType = 'wide' | 'pierce' | 'slow' | 'life'
+
+const POWERUP_DEFS: Record<PowerUpType, { glyph: string; color: string; label: string }> = {
+  wide:   { glyph: 'W', color: '#4be8a0', label: '加宽' },
+  pierce: { glyph: 'P', color: '#ffd93d', label: '穿透' },
+  slow:   { glyph: 'S', color: '#7c9bff', label: '减速' },
+  life:   { glyph: '+', color: '#ff5555', label: '+1' },
+}
+
+const POWERUP_TYPES: PowerUpType[] = ['wide', 'pierce', 'slow', 'life']
+const POWERUP_DROP_CHANCE = 0.15
+const POWERUP_FALL_SPEED = 160
+const POWERUP_EFFECT_DURATION = 8 // 秒
+
+interface PowerUp {
+  x: number
+  y: number
+  type: PowerUpType
+  time: number // 用于动画
+}
+
 // ── 工具函数 ──────────────────────────────────────
 function clamp(v: number, min: number, max: number): number {
   return v < min ? min : v > max ? max : v
@@ -192,6 +214,13 @@ export class WordBreaker {
   private floatingTexts: FloatingText[] = []
   private wakeHoles: WakeHole[] = []
 
+  // 道具
+  private powerUps: PowerUp[] = []
+  private wideTimer = 0
+  private pierceTimer = 0
+  private slowTimer = 0
+  private normalBallSpeed = BALL_SPEED
+
   // 单词学习
   private targetWord: WordEntry | null = null
   private learnedWords: WordEntry[] = []
@@ -202,6 +231,7 @@ export class WordBreaker {
   // 输入状态
   private pointerX = VIEW.width / 2
   private pointerActive = false
+  private isTouchInput = false
   private ballLaunched = false
   private keys = new Set<string>()
 
@@ -242,7 +272,10 @@ export class WordBreaker {
     const rect = this.canvas.getBoundingClientRect()
     this.canvas.width = rect.width * dpr
     this.canvas.height = rect.height * dpr
-    this.ctx.scale(dpr, dpr)
+    // 将 VIEW 逻辑坐标 (1200x800) 映射到实际画布像素
+    const sx = (rect.width * dpr) / this.view.width
+    const sy = (rect.height * dpr) / this.view.height
+    this.ctx.setTransform(sx, 0, 0, sy, 0, 0)
   }
 
   private bindEvents(): void {
@@ -250,6 +283,7 @@ export class WordBreaker {
       const rect = this.canvas.getBoundingClientRect()
       this.pointerX = ((e.clientX - rect.left) / rect.width) * this.view.width
       this.pointerActive = true
+      this.isTouchInput = e.pointerType === 'touch'
     })
 
     this.canvas.addEventListener('pointerdown', () => this.handleAction())
@@ -290,6 +324,10 @@ export class WordBreaker {
     this.particles = []
     this.floatingTexts = []
     this.wakeHoles = []
+    this.powerUps = []
+    this.wideTimer = 0
+    this.pierceTimer = 0
+    this.slowTimer = 0
 
     const words = LEVELS[levelIndex % LEVELS.length]!
     this.levelWords = [...words]
@@ -430,7 +468,10 @@ export class WordBreaker {
       if (this.keys.has('ArrowLeft') || this.keys.has('a')) this.paddle.x -= PADDLE_SPEED * dt
       if (this.keys.has('ArrowRight') || this.keys.has('d')) this.paddle.x += PADDLE_SPEED * dt
     } else if (this.pointerActive) {
-      this.paddle.x = lerp(this.paddle.x, this.pointerX, 0.15)
+      // 触屏直接跟手，鼠标保留平滑插值
+      this.paddle.x = this.isTouchInput
+        ? this.pointerX
+        : lerp(this.paddle.x, this.pointerX, 0.15)
     }
     this.paddle.x = clamp(this.paddle.x, PLAY_AREA.x + this.paddle.width / 2, PLAY_AREA.x + PLAY_AREA.width - this.paddle.width / 2)
 
@@ -480,6 +521,7 @@ export class WordBreaker {
 
     this.checkPaddleCollision()
     this.checkBrickCollisions()
+    this.updatePowerUps(dt)
 
     // 检查清除
     if (this.bricks.every((b) => !b.alive)) {
@@ -530,10 +572,14 @@ export class WordBreaker {
         const overlapBottom = brick.y + brick.height - (this.ball.y - BALL_RADIUS)
         const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom)
 
-        if (minOverlap === overlapLeft || minOverlap === overlapRight) {
-          this.ball.vx = -this.ball.vx
-        } else {
-          this.ball.vy = -this.ball.vy
+        // 穿透模式不反弹、不 break
+        const piercing = this.pierceTimer > 0
+        if (!piercing) {
+          if (minOverlap === overlapLeft || minOverlap === overlapRight) {
+            this.ball.vx = -this.ball.vx
+          } else {
+            this.ball.vy = -this.ball.vy
+          }
         }
 
         const cx = brick.x + brick.width / 2
@@ -568,8 +614,96 @@ export class WordBreaker {
         }
 
         if (this.combo > this.maxCombo) this.maxCombo = this.combo
-        break
+
+        // 随机掉落道具
+        if (Math.random() < POWERUP_DROP_CHANCE) {
+          this.spawnPowerUp(cx, cy)
+        }
+
+        if (!piercing) break
       }
+    }
+  }
+
+  // ── 道具系统 ─────────────────────────────────────
+  private spawnPowerUp(x: number, y: number): void {
+    const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]!
+    this.powerUps.push({ x, y, type, time: 0 })
+  }
+
+  private updatePowerUps(dt: number): void {
+    // 效果计时器衰减
+    this.wideTimer = Math.max(0, this.wideTimer - dt)
+    this.pierceTimer = Math.max(0, this.pierceTimer - dt)
+    this.slowTimer = Math.max(0, this.slowTimer - dt)
+
+    // 恢复球速
+    if (this.slowTimer <= 0 && this.ballLaunched) {
+      const speed = Math.sqrt(this.ball.vx * this.ball.vx + this.ball.vy * this.ball.vy)
+      if (speed > 0 && Math.abs(speed - this.normalBallSpeed * 0.5) < 1) {
+        const scale = this.normalBallSpeed / speed
+        this.ball.vx *= scale
+        this.ball.vy *= scale
+      }
+    }
+
+    // 更新掉落中的道具
+    for (const p of this.powerUps) {
+      p.y += POWERUP_FALL_SPEED * dt
+      p.time += dt
+
+      // 挡板接住
+      const padLeft = this.paddle.x - this.paddle.width / 2
+      const padRight = this.paddle.x + this.paddle.width / 2
+      if (
+        p.y >= this.paddle.y - 8 &&
+        p.y <= this.paddle.y + 12 &&
+        p.x >= padLeft &&
+        p.x <= padRight
+      ) {
+        this.activatePowerUp(p.type)
+        p.y = 9999 // 标记移除
+      }
+    }
+
+    // 移除出界或已收集的道具
+    this.powerUps = this.powerUps.filter(
+      (p) => p.y < PLAY_AREA.y + PLAY_AREA.height + 30
+    )
+  }
+
+  private activatePowerUp(type: PowerUpType): void {
+    const def = POWERUP_DEFS[type]
+    this.addFloatingText(
+      this.paddle.x, this.paddle.y - 30,
+      def.label, def.color, FONTS.combo, 1.2,
+    )
+    this.spawnParticles(this.paddle.x, this.paddle.y, def.color, 8)
+    this.screenShake = 1.5
+    this.bgFlash = 0.4
+    this.bgFlashColor = def.color
+
+    switch (type) {
+      case 'wide':
+        this.wideTimer = POWERUP_EFFECT_DURATION
+        break
+      case 'pierce':
+        this.pierceTimer = POWERUP_EFFECT_DURATION
+        break
+      case 'slow':
+        this.slowTimer = POWERUP_EFFECT_DURATION
+        if (this.ballLaunched) {
+          const speed = Math.sqrt(this.ball.vx * this.ball.vx + this.ball.vy * this.ball.vy)
+          if (speed > 0) {
+            const scale = (this.normalBallSpeed * 0.5) / speed
+            this.ball.vx *= scale
+            this.ball.vy *= scale
+          }
+        }
+        break
+      case 'life':
+        this.lives = Math.min(this.lives + 1, 5)
+        break
     }
   }
 
@@ -810,9 +944,11 @@ export class WordBreaker {
       this.drawBricks()
       this.drawBall()
       this.drawPaddle()
+      this.drawPowerUps()
       this.drawParticles()
       this.drawFloatingTexts()
       this.drawComboDisplay()
+      this.drawActiveEffects()
       if (!this.ballLaunched) this.drawLaunchHint()
     } else if (this.mode === 'clearing') {
       this.drawClearSweep()
@@ -823,6 +959,42 @@ export class WordBreaker {
     } else if (this.mode === 'win') {
       this.drawWinScreen()
     }
+
+    // 竖屏提示
+    this.drawPortraitHint()
+
+    ctx.restore()
+  }
+
+  // ── 竖屏横置提示 ─────────────────────────────────
+  private drawPortraitHint(): void {
+    const rect = this.canvas.getBoundingClientRect()
+    // 仅在窄屏竖屏时显示（宽度 < 高度 且 CSS 宽 < 600）
+    if (rect.width >= rect.height || rect.width >= 600) return
+
+    const ctx = this.ctx
+    const cx = this.view.width / 2
+    const cy = this.view.height / 2
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(4, 7, 13, 0.85)'
+    ctx.fillRect(0, 0, this.view.width, this.view.height)
+
+    // 旋转图标 ↻
+    ctx.font = `80px ${FM}`
+    ctx.fillStyle = COLORS.title
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('↻', cx, cy - 40)
+
+    // 提示文字
+    ctx.font = `700 26px ${FC}`
+    ctx.fillStyle = COLORS.panel
+    ctx.fillText('横屏体验更佳', cx, cy + 40)
+
+    ctx.font = `400 18px ${FC}`
+    ctx.fillStyle = COLORS.hud
+    ctx.fillText('Rotate for best experience', cx, cy + 76)
 
     ctx.restore()
   }
@@ -1225,37 +1397,41 @@ export class WordBreaker {
     }
 
     // 球体
+    const isPiercing = this.pierceTimer > 0
+    const ballColor = isPiercing ? POWERUP_DEFS.pierce.color : COLORS.ball
     const block = this.renderer.getBlock('●', FONTS.ball, 30)
     this.renderer.drawBlock(ctx, block, this.ball.x, this.ball.y - 14, {
-      color: COLORS.ball,
+      color: ballColor,
       align: 'center',
       shadow: true,
-      shadowColor: COLORS.ball,
-      shadowBlur: 18,
+      shadowColor: ballColor,
+      shadowBlur: isPiercing ? 28 : 18,
     })
   }
 
   private drawPaddle(): void {
     const ctx = this.ctx
-    const paddleText = '⟦==============⟧'
+    const isWide = this.wideTimer > 0
+    const paddleText = isWide ? '⟦======================⟧' : '⟦==============⟧'
+    const paddleColor = isWide ? POWERUP_DEFS.wide.color : COLORS.paddle
     const block = this.renderer.getBlock(paddleText, FONTS.paddle, 26)
     this.paddle.width = block.width
 
     // 挡板光晕
     ctx.save()
-    ctx.shadowColor = COLORS.paddle
-    ctx.shadowBlur = 12
+    ctx.shadowColor = paddleColor
+    ctx.shadowBlur = isWide ? 18 : 12
     ctx.globalAlpha = 0.3
-    ctx.fillStyle = COLORS.paddle
+    ctx.fillStyle = paddleColor
     ctx.fillRect(this.paddle.x - this.paddle.width / 2, this.paddle.y + 2, this.paddle.width, 4)
     ctx.restore()
 
     this.renderer.drawBlock(ctx, block, this.paddle.x, this.paddle.y, {
-      color: COLORS.paddle,
+      color: paddleColor,
       align: 'center',
       shadow: true,
-      shadowColor: COLORS.paddle,
-      shadowBlur: 8,
+      shadowColor: paddleColor,
+      shadowBlur: isWide ? 14 : 8,
     })
   }
 
@@ -1311,6 +1487,87 @@ export class WordBreaker {
       ctx.fillStyle = ft.color
       ctx.fillText(ft.text, 0, 0)
       ctx.restore()
+    }
+  }
+
+  // 掉落道具
+  private drawPowerUps(): void {
+    const ctx = this.ctx
+    for (const p of this.powerUps) {
+      const def = POWERUP_DEFS[p.type]
+      const pulse = 1 + Math.sin(p.time * 6) * 0.15
+
+      ctx.save()
+      ctx.translate(p.x, p.y)
+      ctx.scale(pulse, pulse)
+
+      // 外发光
+      ctx.shadowColor = def.color
+      ctx.shadowBlur = 16
+
+      // 胶囊背景
+      ctx.fillStyle = def.color
+      ctx.globalAlpha = 0.2
+      ctx.beginPath()
+      ctx.arc(0, 0, 16, 0, Math.PI * 2)
+      ctx.fill()
+
+      // 字符
+      ctx.globalAlpha = 1
+      ctx.font = `700 20px ${FM}`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillStyle = def.color
+      ctx.fillText(def.glyph, 0, 0)
+
+      ctx.restore()
+    }
+  }
+
+  // 激活中的效果指示器
+  private drawActiveEffects(): void {
+    const effects: { label: string; color: string; timer: number }[] = []
+    if (this.wideTimer > 0) effects.push({ label: '⬌ 加宽', color: POWERUP_DEFS.wide.color, timer: this.wideTimer })
+    if (this.pierceTimer > 0) effects.push({ label: '◎ 穿透', color: POWERUP_DEFS.pierce.color, timer: this.pierceTimer })
+    if (this.slowTimer > 0) effects.push({ label: '⚡ 减速', color: POWERUP_DEFS.slow.color, timer: this.slowTimer })
+    if (effects.length === 0) return
+
+    const ctx = this.ctx
+    const baseX = PLAY_AREA.x + PLAY_AREA.width - 20
+    let y = PLAY_AREA.y + 40
+
+    for (const eff of effects) {
+      const timerText = `${eff.label} ${Math.ceil(eff.timer)}s`
+      const alpha = eff.timer < 2 ? 0.4 + Math.sin(this.gameTime * 8) * 0.4 : 0.9
+
+      ctx.save()
+      ctx.globalAlpha = alpha
+      ctx.font = `700 16px ${FC}`
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'middle'
+      ctx.fillStyle = eff.color
+      ctx.shadowColor = eff.color
+      ctx.shadowBlur = 8
+      ctx.fillText(timerText, baseX, y)
+      ctx.restore()
+
+      // 计时条
+      const barWidth = 60
+      const barHeight = 3
+      const barX = baseX - barWidth
+      const barY = y + 12
+      const progress = eff.timer / POWERUP_EFFECT_DURATION
+
+      ctx.save()
+      ctx.globalAlpha = 0.3
+      ctx.fillStyle = '#1a3050'
+      ctx.fillRect(barX, barY, barWidth, barHeight)
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = eff.color
+      ctx.fillRect(barX, barY, barWidth * progress, barHeight)
+      ctx.restore()
+
+      y += 34
     }
   }
 

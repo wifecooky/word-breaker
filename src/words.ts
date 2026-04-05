@@ -96,6 +96,30 @@ export const LEVELS: WordEntry[][] = [
   ],
 ]
 
+// 单词联想 emoji — 视觉锚点加深记忆
+export const WORD_EMOJI: Record<string, string> = {
+  // Level 1 — 名词
+  apple: '🍎', water: '💧', bread: '🍞', house: '🏠', light: '💡',
+  world: '🌍', dream: '💭', heart: '❤️', stone: '🪨', river: '🏞️',
+  cloud: '☁️', music: '🎵', smile: '😊', storm: '⛈️', flame: '🔥',
+  // Level 2 — 动词
+  chase: '🏃', drift: '🌊', grasp: '✊', bloom: '🌸', shine: '✨',
+  climb: '🧗', weave: '🧶', carve: '🗿', forge: '⚒️', sweep: '🧹',
+  crash: '💥', float: '🎈', spark: '⚡', twist: '🌀', merge: '🤝',
+  // Level 3 — 形容词
+  brave: '🦁', swift: '🐆', vivid: '🌈', quiet: '🤫', bliss: '😇',
+  cruel: '🐍', witty: '🧠', faint: '🌫️', noble: '👑', rapid: '🚀',
+  dense: '🌳', steep: '⛰️', rigid: '🧊', brisk: '🍃', crisp: '❄️',
+  // Level 4 — 进阶
+  epoch: '⏳', vigor: '💪', quest: '🗺️', nexus: '🔗', chaos: '🌪️',
+  realm: '🏰', ghost: '👻', truce: '🕊️', gauge: '📏', poise: '🧘',
+  glyph: '𓀀', crypt: '⚰️', abyss: '🕳️', prism: '🔮', aegis: '🛡️',
+  // Level 5 — 高级
+  lucid: '💎', stoic: '🗻', ethereal: '🦋', zenith: '🏔️', enigma: '❓',
+  aurora: '🌌', mirage: '🏜️', cipher: '🔐', quartz: '💠', sphinx: '🐈',
+  vortex: '🌀', nebula: '🌟', zephyr: '🍃', oracle: '🔮', elixir: '🧪',
+}
+
 // 用于背景文字墙的长文本
 export const WALL_TEXT =
   'The quick brown fox jumps over the lazy dog. ' +

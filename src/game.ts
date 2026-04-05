@@ -1,5 +1,5 @@
 import { PretextRenderer } from './renderer'
-import { LEVELS, WALL_TEXT, type WordEntry } from './words'
+import { LEVELS, WALL_TEXT, WORD_EMOJI, type WordEntry } from './words'
 import * as sfx from './audio'
 import { loadProgress, saveProgress, type Progress } from './storage'
 
@@ -264,6 +264,9 @@ export class WordBreaker {
   private promptFlash = 0
   private comboDisplay = 0 // combo 数字显示用
 
+  // emoji 联想闪现
+  private emojiFlash = { text: '', x: 0, y: 0, life: 0 }
+
   // 拖尾帧计数
   private trailCounter = 0
 
@@ -494,6 +497,7 @@ export class WordBreaker {
     this.promptFlash = Math.max(0, this.promptFlash - dt * 2)
     this.bgFlash = Math.max(0, this.bgFlash - dt * 4)
     this.comboDisplay = Math.max(0, this.comboDisplay - dt * 3)
+    if (this.emojiFlash.life < 1.2) this.emojiFlash.life += dt
 
     // 屏幕震动衰减
     this.screenShake = Math.max(0, this.screenShake - dt * 16)
@@ -687,6 +691,12 @@ export class WordBreaker {
           this.screenShake = 1.5
           sfx.brickHit()
           sfx.speakWord(brick.word.en)
+        }
+
+        // emoji 联想闪现
+        const emoji = WORD_EMOJI[brick.word.en]
+        if (emoji) {
+          this.emojiFlash = { text: emoji, x: cx, y: cy, life: 0 }
         }
 
         if (this.combo > this.maxCombo) this.maxCombo = this.combo
@@ -1123,6 +1133,7 @@ export class WordBreaker {
       this.drawPowerUps()
       this.drawParticles()
       this.drawFloatingTexts()
+      this.drawEmojiFlash()
       this.drawComboDisplay()
       this.drawActiveEffects()
       if (!this.ballLaunched) this.drawLaunchHint()
@@ -1714,6 +1725,41 @@ export class WordBreaker {
       ctx.fillText(ft.text, 0, 0)
       ctx.restore()
     }
+  }
+
+  // emoji 联想闪现
+  private drawEmojiFlash(): void {
+    const ef = this.emojiFlash
+    if (!ef.text || ef.life >= 1.2) return
+
+    const ctx = this.ctx
+    const t = ef.life
+    // 0–0.3s 弹入, 0.3–0.7s 停留, 0.7–1.2s 淡出上漂
+    let scale: number
+    let alpha: number
+    let yOff = 0
+    if (t < 0.3) {
+      scale = 1.5 + (1 - easeOutBack(t / 0.3)) * 1.5
+      alpha = 1
+    } else if (t < 0.7) {
+      scale = 1.5
+      alpha = 1
+    } else {
+      const fadeT = (t - 0.7) / 0.5
+      scale = 1.5 - fadeT * 0.4
+      alpha = 1 - fadeT
+      yOff = -fadeT * 40
+    }
+
+    ctx.save()
+    ctx.globalAlpha = alpha
+    ctx.translate(ef.x, ef.y + yOff)
+    ctx.scale(scale, scale)
+    ctx.font = '48px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(ef.text, 0, 0)
+    ctx.restore()
   }
 
   // 掉落道具

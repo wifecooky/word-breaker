@@ -1,5 +1,6 @@
 import { PretextRenderer } from './renderer'
 import { LEVELS, WALL_TEXT, type WordEntry } from './words'
+import * as sfx from './audio'
 
 // ── 常量 ──────────────────────────────────────────
 const VIEW = { width: 1200, height: 800 }
@@ -291,6 +292,7 @@ export class WordBreaker {
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.key)
       if (e.key === ' ' || e.key === 'Enter') this.handleAction()
+      if (e.key === 'm' || e.key === 'M') sfx.toggleMute()
     })
 
     window.addEventListener('keyup', (e) => this.keys.delete(e.key))
@@ -298,6 +300,7 @@ export class WordBreaker {
   }
 
   private handleAction(): void {
+    sfx.click()
     if (this.mode === 'title') {
       this.startLevel(0)
     } else if (this.mode === 'playing' && !this.ballLaunched) {
@@ -413,6 +416,7 @@ export class WordBreaker {
     this.ball.vx = Math.cos(angle) * BALL_SPEED
     this.ball.vy = Math.sin(angle) * BALL_SPEED
     this.ballLaunched = true
+    sfx.launch()
   }
 
   // ── 游戏循环 ────────────────────────────────────
@@ -495,14 +499,17 @@ export class WordBreaker {
     if (this.ball.x - BALL_RADIUS < PLAY_AREA.x) {
       this.ball.x = PLAY_AREA.x + BALL_RADIUS
       this.ball.vx = Math.abs(this.ball.vx)
+      sfx.wallBounce()
     }
     if (this.ball.x + BALL_RADIUS > PLAY_AREA.x + PLAY_AREA.width) {
       this.ball.x = PLAY_AREA.x + PLAY_AREA.width - BALL_RADIUS
       this.ball.vx = -Math.abs(this.ball.vx)
+      sfx.wallBounce()
     }
     if (this.ball.y - BALL_RADIUS < PLAY_AREA.y) {
       this.ball.y = PLAY_AREA.y + BALL_RADIUS
       this.ball.vy = Math.abs(this.ball.vy)
+      sfx.wallBounce()
     }
 
     // 球掉出底部
@@ -511,8 +518,10 @@ export class WordBreaker {
       this.combo = 0
       this.spawnLostLifeBurst()
       this.screenShake = 3.2
+      sfx.ballLost()
       if (this.lives <= 0) {
         this.mode = 'gameover'
+        sfx.gameOver()
       } else {
         this.resetBallAndPaddle()
       }
@@ -526,6 +535,7 @@ export class WordBreaker {
     // 检查清除
     if (this.bricks.every((b) => !b.alive)) {
       this.mode = 'clearing'
+      sfx.levelClear()
       this.clearProgress = 0
     }
   }
@@ -550,6 +560,7 @@ export class WordBreaker {
       this.ball.y = padTop - BALL_RADIUS
       this.screenShake = 1.2
       this.spawnPaddleSparks()
+      sfx.paddleHit()
     }
   }
 
@@ -602,6 +613,9 @@ export class WordBreaker {
           this.bgFlash = 0.6
           this.bgFlashColor = COLORS.correct
           this.pickTargetWord()
+          sfx.targetHit()
+          sfx.comboTick(this.combo)
+          sfx.speakWord(brick.word.en)
         } else {
           this.score += 10
           this.wrongHits++
@@ -611,6 +625,8 @@ export class WordBreaker {
           this.addFloatingText(cx, brick.y - 4, '+10', '#666666', FONTS.particle, 0.8)
           this.addFloatingText(cx, brick.y + 16, brick.word.zh, '#888888', FONTS.hint, 0.8)
           this.screenShake = 1.5
+          sfx.brickHit()
+          sfx.speakWord(brick.word.en)
         }
 
         if (this.combo > this.maxCombo) this.maxCombo = this.combo
@@ -682,6 +698,7 @@ export class WordBreaker {
     this.screenShake = 1.5
     this.bgFlash = 0.4
     this.bgFlashColor = def.color
+    sfx.powerUpCollect()
 
     switch (type) {
       case 'wide':
@@ -897,6 +914,7 @@ export class WordBreaker {
   private nextLevelOrWin(): void {
     if (this.level + 1 >= LEVELS.length) {
       this.mode = 'win'
+      sfx.win()
     } else {
       this.startLevel(this.level + 1)
     }
@@ -1630,11 +1648,21 @@ export class WordBreaker {
 
     // 已学单词数
     if (this.learnedWords.length > 0) {
-      const learnBlock = this.renderer.getBlock(`已学 ${this.learnedWords.length} 词`, FONTS.hudSmall, 18)
+      const learnBlock = this.renderer.getBlock(`已��� ${this.learnedWords.length} 词`, FONTS.hudSmall, 18)
       this.renderer.drawBlock(ctx, learnBlock, this.view.width / 2, y + 26, {
         color: COLORS.correct,
         align: 'center',
         alpha: 0.7,
+      })
+    }
+
+    // 静音指示
+    if (sfx.isMuted()) {
+      const muteBlock = this.renderer.getBlock('[M] 静音', FONTS.hudSmall, 16)
+      this.renderer.drawBlock(ctx, muteBlock, this.view.width - 40, y + 26, {
+        color: COLORS.hudDim,
+        align: 'right',
+        alpha: 0.6,
       })
     }
   }
@@ -1754,7 +1782,7 @@ export class WordBreaker {
     })
 
     // 操作说明
-    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', '学习单词，挑战五个关卡']
+    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', '按 M 键切换音效 · 击碎单词可听发音']
     for (let i = 0; i < helpTexts.length; i++) {
       const hAlpha = easeOutCubic(clamp((this.gameTime - 1 - i * 0.1) / 0.3, 0, 1))
       const hBlock = this.renderer.getBlock(helpTexts[i]!, FONTS.hint, 18)

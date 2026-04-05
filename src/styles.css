@@ -32,6 +32,16 @@ canvas {
   border-radius: 4px;
 }
 
+/* 全屏模式：去掉 1200px 上限，铺满屏幕 */
+#app:fullscreen {
+  background: #04070d;
+}
+
+#app:fullscreen canvas {
+  width: min(100vw, calc(100vh * 3 / 2));
+  border-radius: 0;
+}
+
 /* 触屏设备显示默认光标 */
 @media (hover: none) {
   canvas {

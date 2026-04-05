@@ -2169,10 +2169,17 @@ export class WordBreaker {
     ctx.fillRect(0, 0, this.view.width, this.view.height)
     ctx.restore()
 
+    // WORD + BREAKER 居中计算
+    const wordBlock = this.renderer.getBlock('WORD', FONTS.title, 60)
+    const breakerBlock = this.renderer.getBlock('BREAKER', FONTS.title, 60)
+    const titleGap = 24
+    const totalTitleW = wordBlock.width + titleGap + breakerBlock.width
+    const wordFinalX = cx - totalTitleW / 2 + wordBlock.width / 2
+    const breakerFinalX = cx + totalTitleW / 2 - breakerBlock.width / 2
+
     // WORD — 左进
     const wordProgress = easeOutBack(clamp(this.gameTime / 0.6, 0, 1))
-    const wordX = lerp(-300, cx - 110, wordProgress)
-    const wordBlock = this.renderer.getBlock('WORD', FONTS.title, 60)
+    const wordX = lerp(-300, wordFinalX, wordProgress)
     this.renderer.drawBlock(ctx, wordBlock, wordX, cy - 80, {
       color: COLORS.title,
       align: 'center',
@@ -2184,8 +2191,7 @@ export class WordBreaker {
 
     // BREAKER — 右进
     const breakerProgress = easeOutBack(clamp((this.gameTime - 0.15) / 0.6, 0, 1))
-    const breakerX = lerp(VIEW.width + 300, cx + 120, breakerProgress)
-    const breakerBlock = this.renderer.getBlock('BREAKER', FONTS.title, 60)
+    const breakerX = lerp(VIEW.width + 300, breakerFinalX, breakerProgress)
     this.renderer.drawBlock(ctx, breakerBlock, breakerX, cy - 80, {
       color: COLORS.titleAlt,
       align: 'center',

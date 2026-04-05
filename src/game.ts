@@ -152,16 +152,17 @@ interface WakeHole {
 type GameMode = 'title' | 'intro' | 'playing' | 'clearing' | 'review' | 'gameover' | 'win'
 
 // ── 道具系统 ─────────────────────────────────────
-type PowerUpType = 'wide' | 'pierce' | 'slow' | 'life'
+type PowerUpType = 'wide' | 'pierce' | 'slow' | 'life' | 'multi'
 
 const POWERUP_DEFS: Record<PowerUpType, { glyph: string; color: string; label: string }> = {
   wide:   { glyph: 'W', color: '#4be8a0', label: '加宽' },
   pierce: { glyph: 'P', color: '#ffd93d', label: '穿透' },
   slow:   { glyph: 'S', color: '#7c9bff', label: '减速' },
   life:   { glyph: '+', color: '#ff5555', label: '+1' },
+  multi:  { glyph: 'M', color: '#b8a0f2', label: '多球' },
 }
 
-const POWERUP_TYPES: PowerUpType[] = ['wide', 'pierce', 'slow', 'life']
+const POWERUP_TYPES: PowerUpType[] = ['wide', 'pierce', 'slow', 'life', 'multi']
 const POWERUP_DROP_CHANCE = 0.15
 const POWERUP_FALL_SPEED = 160
 const POWERUP_EFFECT_DURATION = 8 // 秒
@@ -211,6 +212,7 @@ export class WordBreaker {
   // 游戏对象
   private bricks: Brick[] = []
   private ball: Ball = { x: 0, y: 0, vx: 0, vy: 0, wakePoint: null }
+  private extraBalls: Ball[] = []
   private paddle: Paddle = { x: VIEW.width / 2, width: 100, y: PLAY_AREA.y + PLAY_AREA.height - 30 }
   private particles: Particle[] = []
   private floatingTexts: FloatingText[] = []
@@ -225,6 +227,9 @@ export class WordBreaker {
 
   // 持久化进度
   private progress: Progress = loadProgress()
+
+  // 复习界面点击区域
+  private reviewWordRects: { x: number; y: number; w: number; h: number; word: WordEntry }[] = []
 
   // 单词学习
   private targetWord: WordEntry | null = null
@@ -291,7 +296,21 @@ export class WordBreaker {
       this.isTouchInput = e.pointerType === 'touch'
     })
 
-    this.canvas.addEventListener('pointerdown', () => this.handleAction())
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (this.mode === 'review') {
+        const rect = this.canvas.getBoundingClientRect()
+        const mx = ((e.clientX - rect.left) / rect.width) * this.view.width
+        const my = ((e.clientY - rect.top) / rect.height) * this.view.height
+        for (const r of this.reviewWordRects) {
+          if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
+            sfx.speakWord(r.word.en)
+            sfx.click()
+            return
+          }
+        }
+      }
+      this.handleAction()
+    })
 
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.key)
@@ -338,6 +357,7 @@ export class WordBreaker {
     this.floatingTexts = []
     this.wakeHoles = []
     this.powerUps = []
+    this.extraBalls = []
     this.wideTimer = 0
     this.pierceTimer = 0
     this.slowTimer = 0
@@ -543,6 +563,7 @@ export class WordBreaker {
 
     this.checkPaddleCollision()
     this.checkBrickCollisions()
+    this.updateExtraBalls(dt)
     this.updatePowerUps(dt)
 
     // 检查清除
@@ -654,6 +675,88 @@ export class WordBreaker {
     }
   }
 
+  // ── 多球更新 ─────────────────────────────────────
+  private updateExtraBalls(dt: number): void {
+    for (let i = this.extraBalls.length - 1; i >= 0; i--) {
+      const eb = this.extraBalls[i]!
+      eb.x += eb.vx * dt
+      eb.y += eb.vy * dt
+
+      // 墙壁碰撞
+      if (eb.x - BALL_RADIUS < PLAY_AREA.x) {
+        eb.x = PLAY_AREA.x + BALL_RADIUS
+        eb.vx = Math.abs(eb.vx)
+      }
+      if (eb.x + BALL_RADIUS > PLAY_AREA.x + PLAY_AREA.width) {
+        eb.x = PLAY_AREA.x + PLAY_AREA.width - BALL_RADIUS
+        eb.vx = -Math.abs(eb.vx)
+      }
+      if (eb.y - BALL_RADIUS < PLAY_AREA.y) {
+        eb.y = PLAY_AREA.y + BALL_RADIUS
+        eb.vy = Math.abs(eb.vy)
+      }
+
+      // 掉出底部 → 仅移除，不扣命
+      if (eb.y > PLAY_AREA.y + PLAY_AREA.height + 20) {
+        this.extraBalls.splice(i, 1)
+        continue
+      }
+
+      // 挡板碰撞
+      const padLeft = this.paddle.x - this.paddle.width / 2
+      const padRight = this.paddle.x + this.paddle.width / 2
+      if (
+        eb.vy > 0 &&
+        eb.y + BALL_RADIUS >= this.paddle.y &&
+        eb.y + BALL_RADIUS <= this.paddle.y + 16 &&
+        eb.x >= padLeft &&
+        eb.x <= padRight
+      ) {
+        const hitPos = (eb.x - this.paddle.x) / (this.paddle.width / 2)
+        const angle = -Math.PI / 2 + hitPos * 0.7
+        const speed = Math.sqrt(eb.vx * eb.vx + eb.vy * eb.vy)
+        eb.vx = Math.cos(angle) * speed
+        eb.vy = Math.sin(angle) * speed
+        eb.y = this.paddle.y - BALL_RADIUS
+      }
+
+      // 砖块碰撞
+      for (const brick of this.bricks) {
+        if (!brick.alive) continue
+        if (
+          eb.x + BALL_RADIUS > brick.x &&
+          eb.x - BALL_RADIUS < brick.x + brick.width &&
+          eb.y + BALL_RADIUS > brick.y &&
+          eb.y - BALL_RADIUS < brick.y + brick.height
+        ) {
+          brick.alive = false
+          brick.hitAlpha = 1
+
+          const overlapLeft = eb.x + BALL_RADIUS - brick.x
+          const overlapRight = brick.x + brick.width - (eb.x - BALL_RADIUS)
+          const overlapTop = eb.y + BALL_RADIUS - brick.y
+          const overlapBottom = brick.y + brick.height - (eb.y - BALL_RADIUS)
+          const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom)
+
+          if (minOverlap === overlapLeft || minOverlap === overlapRight) {
+            eb.vx = -eb.vx
+          } else {
+            eb.vy = -eb.vy
+          }
+
+          const cx = brick.x + brick.width / 2
+          const cy = brick.y + brick.height / 2
+
+          this.score += 10
+          this.spawnLetterBurst(cx, cy, brick.word.en, COLORS.spark)
+          this.addFloatingText(cx, brick.y - 4, '+10', '#666666', FONTS.particle, 0.8)
+          sfx.brickHit()
+          break
+        }
+      }
+    }
+  }
+
   // ── 道具系统 ─────────────────────────────────────
   private spawnPowerUp(x: number, y: number): void {
     const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)]!
@@ -733,6 +836,22 @@ export class WordBreaker {
         break
       case 'life':
         this.lives = Math.min(this.lives + 1, 5)
+        break
+      case 'multi':
+        if (this.ballLaunched) {
+          for (let i = 0; i < 2; i++) {
+            const spread = (i === 0 ? -1 : 1) * 0.5
+            const speed = Math.sqrt(this.ball.vx * this.ball.vx + this.ball.vy * this.ball.vy)
+            const angle = Math.atan2(this.ball.vy, this.ball.vx) + spread
+            this.extraBalls.push({
+              x: this.ball.x,
+              y: this.ball.y,
+              vx: Math.cos(angle) * speed,
+              vy: Math.sin(angle) * speed,
+              wakePoint: null,
+            })
+          }
+        }
         break
     }
   }
@@ -1136,6 +1255,9 @@ export class WordBreaker {
       // 球
       if (this.ballLaunched) {
         this.pushCircleBlocked(blocked, this.ball.x, this.ball.y, BALL_RADIUS + 30, bandTop, bandBottom)
+        for (const eb of this.extraBalls) {
+          this.pushCircleBlocked(blocked, eb.x, eb.y, BALL_RADIUS + 20, bandTop, bandBottom)
+        }
       }
 
       // 挡板
@@ -1438,6 +1560,19 @@ export class WordBreaker {
       shadowColor: ballColor,
       shadowBlur: isPiercing ? 28 : 18,
     })
+
+    // 多球
+    const multiColor = POWERUP_DEFS.multi.color
+    for (const eb of this.extraBalls) {
+      const ebBlock = this.renderer.getBlock('●', FONTS.ball, 24)
+      this.renderer.drawBlock(ctx, ebBlock, eb.x, eb.y - 12, {
+        color: multiColor,
+        align: 'center',
+        shadow: true,
+        shadowColor: multiColor,
+        shadowBlur: 14,
+      })
+    }
   }
 
   private drawPaddle(): void {
@@ -1862,6 +1997,7 @@ export class WordBreaker {
     const words = this.levelWords
     const colWidth = 380
     const startX = cx - colWidth + 40
+    this.reviewWordRects = []
 
     for (let i = 0; i < words.length; i++) {
       const word = words[i]!
@@ -1871,20 +2007,41 @@ export class WordBreaker {
       const wy = y + row * 30
       const learned = this.learnedWords.includes(word)
 
+      // 记录点击区域
+      this.reviewWordRects.push({ x: wx - 24, y: wy - 6, w: colWidth - 20, h: 28, word })
+
       const enBlock = this.renderer.getBlock(word.en, FONTS.review, 22)
       this.renderer.drawBlock(ctx, enBlock, wx, wy, { color: learned ? COLORS.correct : COLORS.dim })
 
       const zhBlock = this.renderer.getBlock(word.zh, FONTS.reviewZh, 20)
       this.renderer.drawBlock(ctx, zhBlock, wx + 120, wy, { color: learned ? COLORS.correct : COLORS.dim, alpha: 0.8 })
 
+      // 小喇叭图标
+      ctx.save()
+      ctx.globalAlpha = 0.4
+      ctx.font = `14px ${FS}`
+      ctx.fillStyle = learned ? COLORS.correct : COLORS.dim
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('🔊', wx - 22, wy + 8)
+      ctx.restore()
+
       if (learned) {
         const checkBlock = this.renderer.getBlock('✓', FONTS.review, 22)
-        this.renderer.drawBlock(ctx, checkBlock, wx - 20, wy, { color: COLORS.correct })
+        this.renderer.drawBlock(ctx, checkBlock, wx + colWidth - 60, wy, { color: COLORS.correct })
       }
     }
 
+    // 发音提示
+    const tipBlock = this.renderer.getBlock('点击单词可听发音', FONTS.hudSmall, 15)
+    this.renderer.drawBlock(ctx, tipBlock, cx, this.view.height - 90, {
+      color: COLORS.hudDim,
+      align: 'center',
+      alpha: 0.6,
+    })
+
     const contAlpha = 0.3 + Math.sin(this.gameTime * 3) * 0.3
-    const contText = this.level + 1 >= LEVELS.length ? '[ 点击查看最终成绩 ]' : '[ 点击进入下一关 ]'
+    const contText = this.level + 1 >= LEVELS.length ? '[ 点击空白区域查看最终成绩 ]' : '[ 点击空白区域进入下一关 ]'
     const contBlock = this.renderer.getBlock(contText, FONTS.hint, 20)
     this.renderer.drawBlock(ctx, contBlock, cx, this.view.height - 60, {
       color: COLORS.panel,

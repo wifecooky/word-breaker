@@ -230,6 +230,8 @@ export class WordBreaker {
 
   // 复习界面点击区域
   private reviewWordRects: { x: number; y: number; w: number; h: number; word: WordEntry }[] = []
+  // 标题画面关卡按钮区域
+  private levelBtnRects: { x: number; y: number; w: number; h: number; level: number }[] = []
 
   // 单词学习
   private targetWord: WordEntry | null = null
@@ -303,10 +305,11 @@ export class WordBreaker {
     })
 
     this.canvas.addEventListener('pointerdown', (e) => {
+      const rect = this.canvas.getBoundingClientRect()
+      const mx = ((e.clientX - rect.left) / rect.width) * this.view.width
+      const my = ((e.clientY - rect.top) / rect.height) * this.view.height
+
       if (this.mode === 'review') {
-        const rect = this.canvas.getBoundingClientRect()
-        const mx = ((e.clientX - rect.left) / rect.width) * this.view.width
-        const my = ((e.clientY - rect.top) / rect.height) * this.view.height
         for (const r of this.reviewWordRects) {
           if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
             sfx.speakWord(r.word.en)
@@ -315,6 +318,18 @@ export class WordBreaker {
           }
         }
       }
+
+      // 标题画面关卡按钮
+      if (this.mode === 'title') {
+        for (const btn of this.levelBtnRects) {
+          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+            sfx.click()
+            this.startLevel(btn.level)
+            return
+          }
+        }
+      }
+
       this.handleAction()
     })
 
@@ -459,6 +474,8 @@ export class WordBreaker {
     pick.isTarget = true
     this.targetWord = pick.word
     this.promptFlash = 1
+    // 自动朗读目标词，强化听觉记忆
+    sfx.speakWord(pick.word.en)
   }
 
   private resetBallAndPaddle(): void {
@@ -676,10 +693,15 @@ export class WordBreaker {
           this.screenShake = 2.8
           this.bgFlash = 0.6
           this.bgFlashColor = COLORS.correct
+
+          // 连击里程碑爆发
+          if (this.combo === 5 || this.combo === 10 || this.combo === 15) {
+            this.spawnComboBurst(this.combo)
+          }
+
           this.pickTargetWord()
           sfx.targetHit()
           sfx.comboTick(this.combo)
-          sfx.speakWord(brick.word.en)
         } else {
           this.score += 10
           this.wrongHits++
@@ -939,6 +961,41 @@ export class WordBreaker {
         gravity: 80,
         affectsWall,
         wallRadius: affectsWall ? 12 : 0,
+      })
+    }
+  }
+
+  // 连击里程碑爆发 — 全屏粒子雨
+  private spawnComboBurst(combo: number): void {
+    const intensity = combo >= 15 ? 40 : combo >= 10 ? 28 : 16
+    const colors = ['#ffd93d', '#4be8a0', '#7c9bff', '#f28daa', '#b8a0f2']
+    this.screenShake = Math.min(6, combo * 0.5)
+    this.bgFlash = 1
+    this.bgFlashColor = COLORS.prompt
+
+    const label = combo >= 15 ? 'UNSTOPPABLE!' : combo >= 10 ? 'AMAZING!' : 'GREAT!'
+    this.addFloatingText(this.view.width / 2, this.view.height / 2 - 40, label, COLORS.prompt, FONTS.combo, 1.6)
+    this.addFloatingText(this.view.width / 2, this.view.height / 2 + 10, `${combo}x COMBO`, COLORS.title, FONTS.comboSmall, 1.2)
+
+    for (let i = 0; i < intensity; i++) {
+      const x = Math.random() * this.view.width
+      const y = Math.random() * this.view.height * 0.4
+      const color = colors[Math.floor(Math.random() * colors.length)]!
+      this.particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 200,
+        vy: 60 + Math.random() * 120,
+        text: ['★', '✦', '◆', '♦', '●'][Math.floor(Math.random() * 5)]!,
+        color,
+        alpha: 1,
+        life: 0,
+        maxLife: 0.8 + Math.random() * 0.6,
+        size: 10 + Math.random() * 12,
+        rotation: 0,
+        rotationSpeed: (Math.random() - 0.5) * 5,
+        gravity: 50,
+        affectsWall: true,
+        wallRadius: 15,
       })
     }
   }
@@ -2049,11 +2106,58 @@ export class WordBreaker {
       })
     }
 
+    // 关卡选择按钮
+    const lvAlpha = easeOutCubic(clamp((this.gameTime - 1.2) / 0.4, 0, 1))
+    if (lvAlpha > 0.01) {
+      this.levelBtnRects = []
+      const btnW = 100
+      const btnH = 36
+      const gap = 16
+      const totalW = LEVELS.length * btnW + (LEVELS.length - 1) * gap
+      const startX = cx - totalW / 2
+      const btnY = cy + 280
+      const levelLabels = ['基础', '动词', '形容词', '进阶', '高级']
+
+      for (let i = 0; i < LEVELS.length; i++) {
+        const bx = startX + i * (btnW + gap)
+        const unlocked = i === 0 || this.progress.bestLevel >= i
+        const alpha = lvAlpha * (unlocked ? 0.9 : 0.3)
+
+        // 按钮背景
+        ctx.save()
+        ctx.globalAlpha = alpha * 0.15
+        ctx.fillStyle = unlocked ? COLORS.title : COLORS.dim
+        ctx.beginPath()
+        ctx.roundRect(bx, btnY, btnW, btnH, 6)
+        ctx.fill()
+
+        // 按钮边框
+        ctx.globalAlpha = alpha * 0.5
+        ctx.strokeStyle = unlocked ? COLORS.title : COLORS.dim
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+        ctx.restore()
+
+        // 按钮文字
+        const label = `L${i + 1} ${levelLabels[i]}`
+        const btnBlock = this.renderer.getBlock(label, FONTS.hudSmall, 16)
+        this.renderer.drawBlock(ctx, btnBlock, bx + btnW / 2, btnY + 8, {
+          color: unlocked ? COLORS.title : COLORS.dim,
+          align: 'center',
+          alpha,
+        })
+
+        if (unlocked) {
+          this.levelBtnRects.push({ x: bx, y: btnY, w: btnW, h: btnH, level: i })
+        }
+      }
+    }
+
     // 历史记录（有记录时才显示）
     const p = this.progress
     if (p.gamesPlayed > 0) {
       const statsAlpha = easeOutCubic(clamp((this.gameTime - 1.5) / 0.4, 0, 1)) * 0.7
-      const statsY = cy + 300
+      const statsY = cy + 340
       const statsTexts = [
         `最高分 ${p.highScore}`,
         `已掌握 ${p.wordsLearned.length} 词`,

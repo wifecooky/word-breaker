@@ -1,6 +1,7 @@
 import { PretextRenderer } from './renderer'
 import { LEVELS, WALL_TEXT, type WordEntry } from './words'
 import * as sfx from './audio'
+import { loadProgress, saveProgress, type Progress } from './storage'
 
 // ── 常量 ──────────────────────────────────────────
 const VIEW = { width: 1200, height: 800 }
@@ -222,6 +223,9 @@ export class WordBreaker {
   private slowTimer = 0
   private normalBallSpeed = BALL_SPEED
 
+  // 持久化进度
+  private progress: Progress = loadProgress()
+
   // 单词学习
   private targetWord: WordEntry | null = null
   private learnedWords: WordEntry[] = []
@@ -308,6 +312,12 @@ export class WordBreaker {
     } else if (this.mode === 'review') {
       this.nextLevelOrWin()
     } else if (this.mode === 'gameover' || this.mode === 'win') {
+      this.progress = saveProgress({
+        score: this.score,
+        combo: this.maxCombo,
+        level: this.level,
+        words: this.learnedWords.map((w) => w.en),
+      })
       this.mode = 'title'
       this.score = 0
       this.lives = 3
@@ -331,6 +341,9 @@ export class WordBreaker {
     this.wideTimer = 0
     this.pierceTimer = 0
     this.slowTimer = 0
+
+    // 难度递增：每关球速 +8%
+    this.normalBallSpeed = BALL_SPEED * (1 + levelIndex * 0.08)
 
     const words = LEVELS[levelIndex % LEVELS.length]!
     this.levelWords = [...words]
@@ -413,8 +426,8 @@ export class WordBreaker {
 
   private launchBall(): void {
     const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.6
-    this.ball.vx = Math.cos(angle) * BALL_SPEED
-    this.ball.vy = Math.sin(angle) * BALL_SPEED
+    this.ball.vx = Math.cos(angle) * this.normalBallSpeed
+    this.ball.vy = Math.sin(angle) * this.normalBallSpeed
     this.ballLaunched = true
     sfx.launch()
   }
@@ -1639,8 +1652,10 @@ export class WordBreaker {
       align: 'right',
     })
 
-    // 关卡
-    const levelBlock = this.renderer.getBlock(`LEVEL ${this.level + 1}`, FONTS.hud, 22)
+    // 关卡 + 速度倍率
+    const speedPct = Math.round((1 + this.level * 0.08) * 100)
+    const levelStr = speedPct > 100 ? `LEVEL ${this.level + 1}  ×${speedPct}%` : `LEVEL ${this.level + 1}`
+    const levelBlock = this.renderer.getBlock(levelStr, FONTS.hud, 22)
     this.renderer.drawBlock(ctx, levelBlock, this.view.width / 2, y, {
       color: COLORS.title,
       align: 'center',
@@ -1792,6 +1807,26 @@ export class WordBreaker {
         alpha: hAlpha * 0.8,
       })
     }
+
+    // 历史记录（有记录时才显示）
+    const p = this.progress
+    if (p.gamesPlayed > 0) {
+      const statsAlpha = easeOutCubic(clamp((this.gameTime - 1.5) / 0.4, 0, 1)) * 0.7
+      const statsY = cy + 300
+      const statsTexts = [
+        `最高分 ${p.highScore}`,
+        `已掌握 ${p.wordsLearned.length} 词`,
+        `最佳连击 ${p.bestCombo}`,
+        `游戏 ${p.gamesPlayed} 次`,
+      ]
+      const statsStr = statsTexts.join('  ·  ')
+      const statsBlock = this.renderer.getBlock(statsStr, FONTS.hudSmall, 16)
+      this.renderer.drawBlock(ctx, statsBlock, cx, statsY, {
+        color: COLORS.hudDim,
+        align: 'center',
+        alpha: statsAlpha,
+      })
+    }
   }
 
   private drawReviewScreen(): void {
@@ -1882,12 +1917,26 @@ export class WordBreaker {
     const scoreBlock = this.renderer.getBlock(`最终得分: ${this.score}`, FONTS.subtitle, 26)
     this.renderer.drawBlock(ctx, scoreBlock, cx, cy + 20, { color: COLORS.hud, align: 'center' })
 
+    // 新纪录提示
+    if (this.score > this.progress.highScore) {
+      const newBlock = this.renderer.getBlock('NEW HIGH SCORE!', FONTS.hud, 20)
+      const nAlpha = 0.6 + Math.sin(this.gameTime * 4) * 0.3
+      this.renderer.drawBlock(ctx, newBlock, cx, cy + 52, {
+        color: COLORS.titleAlt,
+        align: 'center',
+        alpha: nAlpha,
+        shadow: true,
+        shadowColor: COLORS.titleAlt,
+        shadowBlur: 12,
+      })
+    }
+
     const wordsBlock = this.renderer.getBlock(`学习了 ${this.learnedWords.length} 个单词`, FONTS.hint, 20)
-    this.renderer.drawBlock(ctx, wordsBlock, cx, cy + 60, { color: COLORS.prompt, align: 'center' })
+    this.renderer.drawBlock(ctx, wordsBlock, cx, cy + 80, { color: COLORS.prompt, align: 'center' })
 
     const retryAlpha = 0.3 + Math.sin(this.gameTime * 3) * 0.3
     const retryBlock = this.renderer.getBlock('[ 点击重新开始 ]', FONTS.hint, 20)
-    this.renderer.drawBlock(ctx, retryBlock, cx, cy + 120, { color: COLORS.panel, align: 'center', alpha: retryAlpha })
+    this.renderer.drawBlock(ctx, retryBlock, cx, cy + 140, { color: COLORS.panel, align: 'center', alpha: retryAlpha })
   }
 
   private drawWinScreen(): void {

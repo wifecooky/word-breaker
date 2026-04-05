@@ -27,7 +27,6 @@ canvas {
   display: block;
   aspect-ratio: 3 / 2;
   width: min(1200px, 100vw, calc(100vh * 3 / 2));
-  cursor: none;
   touch-action: none;
   border-radius: 4px;
 }

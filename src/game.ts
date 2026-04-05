@@ -194,6 +194,10 @@ function lerpColor(a: string, b: string, t: number): string {
   return `#${((r << 16) | (g << 8) | bl).toString(16).padStart(6, '0')}`
 }
 
+function hitTest(mx: number, my: number, r: { x: number; y: number; w: number; h: number }): boolean {
+  return mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h
+}
+
 // ── 游戏主类 ──────────────────────────────────────
 export class WordBreaker {
   private canvas: HTMLCanvasElement
@@ -242,6 +246,7 @@ export class WordBreaker {
 
   // 输入状态
   private pointerX = VIEW.width / 2
+  private pointerY = VIEW.height / 2
   private pointerActive = false
   private isTouchInput = false
   private ballLaunched = false
@@ -271,6 +276,23 @@ export class WordBreaker {
 
   // 拖尾帧计数
   private trailCounter = 0
+  // 彗星尾迹位置缓冲
+  private ballTrail: { x: number; y: number }[] = []
+
+  // 目标提示计时
+  private targetTimer = 0
+
+  // 难度
+  private difficulty: 'easy' | 'normal' | 'hard' = 'normal'
+  private difficultyBtnRects: { x: number; y: number; w: number; h: number; diff: 'easy' | 'normal' | 'hard' }[] = []
+
+  // 设置面板
+  private settingsOpen = false
+  private selectedLevel = 0
+  private startBtnRect = { x: 0, y: 0, w: 0, h: 0 }
+  private settingsBtnRect = { x: 0, y: 0, w: 0, h: 0 }
+  private closeBtnRect = { x: 0, y: 0, w: 0, h: 0 }
+  private settingsStartBtnRect = { x: 0, y: 0, w: 0, h: 0 }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -300,6 +322,7 @@ export class WordBreaker {
     this.canvas.addEventListener('pointermove', (e) => {
       const rect = this.canvas.getBoundingClientRect()
       this.pointerX = ((e.clientX - rect.left) / rect.width) * this.view.width
+      this.pointerY = ((e.clientY - rect.top) / rect.height) * this.view.height
       this.pointerActive = true
       this.isTouchInput = e.pointerType === 'touch'
     })
@@ -319,14 +342,43 @@ export class WordBreaker {
         }
       }
 
-      // 标题画面关卡按钮
+      // 标题画面按钮
       if (this.mode === 'title') {
-        for (const btn of this.levelBtnRects) {
-          if (mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+        if (this.settingsOpen) {
+          // 设置面板内按钮
+          for (const btn of this.difficultyBtnRects) {
+            if (hitTest(mx, my, btn)) { sfx.click(); this.difficulty = btn.diff; return }
+          }
+          for (const btn of this.levelBtnRects) {
+            if (hitTest(mx, my, btn)) { sfx.click(); this.selectedLevel = btn.level; return }
+          }
+          if (hitTest(mx, my, this.settingsStartBtnRect)) {
             sfx.click()
-            this.startLevel(btn.level)
+            this.lives = this.difficulty === 'easy' ? 5 : this.difficulty === 'hard' ? 2 : 3
+            this.settingsOpen = false
+            this.startLevel(this.selectedLevel)
             return
           }
+          if (hitTest(mx, my, this.closeBtnRect)) { sfx.click(); this.settingsOpen = false; return }
+          // 面板外点击关闭
+          const pw = 720, ph = 480
+          const panelX = this.view.width / 2 - pw / 2, panelY = this.view.height / 2 - ph / 2
+          if (mx < panelX || mx > panelX + pw || my < panelY || my > panelY + ph) {
+            this.settingsOpen = false
+          }
+          return // 阻止穿透
+        }
+        // 主画面按钮
+        if (hitTest(mx, my, this.startBtnRect)) {
+          sfx.click()
+          this.lives = this.difficulty === 'easy' ? 5 : this.difficulty === 'hard' ? 2 : 3
+          this.startLevel(this.selectedLevel)
+          return
+        }
+        if (hitTest(mx, my, this.settingsBtnRect)) {
+          sfx.click()
+          this.settingsOpen = true
+          return
         }
       }
 
@@ -335,12 +387,24 @@ export class WordBreaker {
 
     window.addEventListener('keydown', (e) => {
       this.keys.add(e.key)
+      // 设置面板快捷键
+      if (this.mode === 'title' && this.settingsOpen) {
+        if (e.key === 'Escape' || e.key === 's' || e.key === 'S') { this.settingsOpen = false; return }
+        if (e.key === ' ' || e.key === 'Enter') { this.settingsOpen = false; return }
+        return
+      }
       if (e.key === ' ' || e.key === 'Enter') {
         if (this.paused) { this.paused = false; return }
         this.handleAction()
       }
-      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      if (e.key === 'Escape') {
         if (this.mode === 'playing') this.paused = !this.paused
+      }
+      if (e.key === 'p' || e.key === 'P') {
+        if (this.mode === 'playing') this.paused = !this.paused
+      }
+      if (e.key === 's' || e.key === 'S') {
+        if (this.mode === 'title') this.settingsOpen = !this.settingsOpen
       }
       if (e.key === 'm' || e.key === 'M') sfx.toggleMute()
       if (e.key === 'f' || e.key === 'F') this.toggleFullscreen()
@@ -362,7 +426,9 @@ export class WordBreaker {
   private handleAction(): void {
     sfx.click()
     if (this.mode === 'title') {
-      this.startLevel(0)
+      if (this.settingsOpen) return
+      this.lives = this.difficulty === 'easy' ? 5 : this.difficulty === 'hard' ? 2 : 3
+      this.startLevel(this.selectedLevel)
     } else if (this.mode === 'playing' && !this.ballLaunched) {
       this.launchBall()
     } else if (this.mode === 'review') {
@@ -399,8 +465,9 @@ export class WordBreaker {
     this.pierceTimer = 0
     this.slowTimer = 0
 
-    // 难度递增：每关球速 +8%
-    this.normalBallSpeed = BALL_SPEED * (1 + levelIndex * 0.08)
+    // 难度递增：每关球速 +8%，叠加难度倍率
+    const diffMul = this.difficulty === 'easy' ? 0.8 : this.difficulty === 'hard' ? 1.25 : 1
+    this.normalBallSpeed = BALL_SPEED * (1 + levelIndex * 0.08) * diffMul
 
     const words = [...LEVELS[levelIndex % LEVELS.length]!]
     // Fisher-Yates 洗牌，每次游戏词序不同
@@ -474,8 +541,9 @@ export class WordBreaker {
     pick.isTarget = true
     this.targetWord = pick.word
     this.promptFlash = 1
-    // 自动朗读目标词，强化听觉记忆
-    sfx.speakWord(pick.word.en)
+    this.targetTimer = 0
+    // 延迟朗读新目标词，避免和被击碎词的发音重叠
+    setTimeout(() => sfx.speakWord(pick.word.en), 1200)
   }
 
   private resetBallAndPaddle(): void {
@@ -486,6 +554,7 @@ export class WordBreaker {
     this.ball.vy = 0
     this.ball.wakePoint = null
     this.ballLaunched = false
+    this.ballTrail = []
   }
 
   private launchBall(): void {
@@ -571,6 +640,13 @@ export class WordBreaker {
 
     // 球拖尾粒子
     this.spawnBallTrail()
+
+    // 彗星尾迹缓冲
+    this.ballTrail.push({ x: this.ball.x, y: this.ball.y })
+    if (this.ballTrail.length > 12) this.ballTrail.shift()
+
+    // 目标提示计时
+    this.targetTimer += dt
 
     // 轨迹空洞
     this.trackWake()
@@ -1210,6 +1286,16 @@ export class WordBreaker {
     // 竖屏提示
     this.drawPortraitHint()
 
+    // 光标：游戏中隐藏，菜单悬浮按钮时手型，其余默认
+    if (this.mode === 'playing') {
+      this.canvas.style.cursor = 'none'
+    } else if (this.mode === 'title' || this.mode === 'review') {
+      const hovering = this.isHoveringButton()
+      this.canvas.style.cursor = hovering ? 'pointer' : 'default'
+    } else {
+      this.canvas.style.cursor = 'default'
+    }
+
     ctx.restore()
   }
 
@@ -1242,6 +1328,24 @@ export class WordBreaker {
     ctx.fillText('按 P / Esc / Space 继续', cx, cy + 68)
 
     ctx.restore()
+  }
+
+  // 鼠标是否悬浮在可点击按钮上
+  private isHoveringButton(): boolean {
+    const mx = this.pointerX
+    const my = this.pointerY
+    if (this.settingsOpen) {
+      const panelRects = [
+        ...this.difficultyBtnRects, ...this.levelBtnRects,
+        this.closeBtnRect, this.settingsStartBtnRect,
+      ]
+      return panelRects.some(r => hitTest(mx, my, r))
+    }
+    const allRects = [
+      this.startBtnRect, this.settingsBtnRect,
+      ...this.reviewWordRects.map(r => ({ x: r.x, y: r.y, w: r.w, h: r.h })),
+    ]
+    return allRects.some(r => hitTest(mx, my, r))
   }
 
   // ── 竖屏横置提示 ─────────────────────────────────
@@ -1658,12 +1762,45 @@ export class WordBreaker {
           align: 'center',
           alpha: 0.5,
         })
+
+        // 8 秒未击中目标：箭头脉冲引导
+        if (this.targetTimer > 8) {
+          const hintAlpha = 0.4 + Math.sin(this.gameTime * 6) * 0.3
+          const arrowY = brick.y - 18 + Math.sin(this.gameTime * 4) * 4
+          ctx.save()
+          ctx.globalAlpha = hintAlpha
+          ctx.font = `700 20px ${FS}`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = COLORS.prompt
+          ctx.shadowColor = COLORS.prompt
+          ctx.shadowBlur = 10
+          ctx.fillText('▼', brick.x + brick.width / 2, arrowY)
+          ctx.restore()
+        }
       }
     }
   }
 
   private drawBall(): void {
     const ctx = this.ctx
+
+    // 彗星尾迹
+    if (this.ballLaunched && this.ballTrail.length > 1) {
+      const isPiercing = this.pierceTimer > 0
+      const trailColor = isPiercing ? POWERUP_DEFS.pierce.color : COLORS.trail
+      for (let i = 0; i < this.ballTrail.length - 1; i++) {
+        const t = i / this.ballTrail.length
+        const p = this.ballTrail[i]!
+        ctx.save()
+        ctx.globalAlpha = t * 0.35
+        ctx.fillStyle = trailColor
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, 3 + t * 6, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
+    }
 
     // 球体光晕
     if (this.ballLaunched) {
@@ -2084,94 +2221,331 @@ export class WordBreaker {
       })
     }
 
-    // 开始提示
-    const startAlpha = 0.3 + Math.sin(this.gameTime * 3) * 0.3
-    const readyProgress = easeOutCubic(clamp((this.gameTime - 0.8) / 0.3, 0, 1))
-    const startBlock = this.renderer.getBlock('[ 点击开始游戏 ]', FONTS.hint, 20)
-    this.renderer.drawBlock(ctx, startBlock, cx, cy + 130, {
-      color: COLORS.panel,
-      align: 'center',
-      alpha: startAlpha * readyProgress,
-    })
+    // ▶ 开始游戏 主按钮
+    const btnAlpha = easeOutCubic(clamp((this.gameTime - 0.8) / 0.3, 0, 1))
+    if (btnAlpha > 0.01) {
+      const sbW = 260, sbH = 50
+      const sbX = cx - sbW / 2, sbY = cy + 200
+      this.startBtnRect = { x: sbX, y: sbY, w: sbW, h: sbH }
 
-    // 操作说明
-    const helpTexts = ['← → / A D / 鼠标  移动挡板', '击碎高亮目标词获得高分', 'M 音效 · P 暂停 · F 全屏 · 击碎单词可听发音']
-    for (let i = 0; i < helpTexts.length; i++) {
-      const hAlpha = easeOutCubic(clamp((this.gameTime - 1 - i * 0.1) / 0.3, 0, 1))
-      const hBlock = this.renderer.getBlock(helpTexts[i]!, FONTS.hint, 18)
-      this.renderer.drawBlock(ctx, hBlock, cx, cy + 190 + i * 28, {
-        color: COLORS.dim,
+      const pulse = 0.8 + Math.sin(this.gameTime * 3) * 0.2
+
+      ctx.save()
+      ctx.globalAlpha = btnAlpha * 0.2 * pulse
+      ctx.fillStyle = COLORS.title
+      ctx.shadowColor = COLORS.title
+      ctx.shadowBlur = 20
+      ctx.beginPath()
+      ctx.roundRect(sbX, sbY, sbW, sbH, 8)
+      ctx.fill()
+
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = btnAlpha * 0.9
+      ctx.strokeStyle = COLORS.title
+      ctx.lineWidth = 2.5
+      ctx.stroke()
+      ctx.restore()
+
+      const startLabel = this.renderer.getBlock('▶  开始游戏', FONTS.prompt, 26)
+      this.renderer.drawBlock(ctx, startLabel, cx, sbY + 12, {
+        color: COLORS.title,
         align: 'center',
-        alpha: hAlpha * 0.8,
+        alpha: btnAlpha,
+        shadow: true,
+        shadowColor: COLORS.title,
+        shadowBlur: 14,
       })
     }
 
-    // 关卡选择按钮
-    const lvAlpha = easeOutCubic(clamp((this.gameTime - 1.2) / 0.4, 0, 1))
-    if (lvAlpha > 0.01) {
-      this.levelBtnRects = []
-      const btnW = 100
-      const btnH = 36
-      const gap = 16
-      const totalW = LEVELS.length * btnW + (LEVELS.length - 1) * gap
-      const startX = cx - totalW / 2
-      const btnY = cy + 280
-      const levelLabels = ['基础', '动词', '形容词', '进阶', '高级']
+    // ⚙ 设置 次级按钮
+    const stAlpha = easeOutCubic(clamp((this.gameTime - 1.0) / 0.3, 0, 1))
+    if (stAlpha > 0.01) {
+      const stW = 160, stH = 40
+      const stX = cx - stW / 2, stY = cy + 270
+      this.settingsBtnRect = { x: stX, y: stY, w: stW, h: stH }
 
-      for (let i = 0; i < LEVELS.length; i++) {
-        const bx = startX + i * (btnW + gap)
-        const unlocked = i === 0 || this.progress.bestLevel >= i
-        const alpha = lvAlpha * (unlocked ? 0.9 : 0.3)
+      ctx.save()
+      ctx.globalAlpha = stAlpha * 0.1
+      ctx.fillStyle = COLORS.hud
+      ctx.beginPath()
+      ctx.roundRect(stX, stY, stW, stH, 6)
+      ctx.fill()
 
-        // 按钮背景
-        ctx.save()
-        ctx.globalAlpha = alpha * 0.15
+      ctx.globalAlpha = stAlpha * 0.5
+      ctx.strokeStyle = COLORS.hud
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+      ctx.restore()
+
+      const settingsLabel = this.renderer.getBlock('⚙  设置', FONTS.hint, 20)
+      this.renderer.drawBlock(ctx, settingsLabel, cx, stY + 10, {
+        color: COLORS.hud,
+        align: 'center',
+        alpha: stAlpha * 0.8,
+      })
+    }
+
+    // 设置面板叠加层
+    if (this.settingsOpen) this.drawSettingsPanel()
+  }
+
+  // ── 设置面板 ──────────────────────────────────────
+  private drawPanelBorder(x: number, y: number, w: number, h: number): void {
+    const ctx = this.ctx
+    const color = COLORS.frameBright
+    ctx.save()
+    ctx.globalAlpha = 0.8
+    ctx.font = FONTS.border
+    ctx.fillStyle = color
+    ctx.textBaseline = 'top'
+
+    const charW = 14, charH = 18
+
+    ctx.fillText('╔', x, y)
+    ctx.fillText('╗', x + w - charW, y)
+    ctx.fillText('╚', x, y + h - charH)
+    ctx.fillText('╝', x + w - charW, y + h - charH)
+
+    for (let px = x + charW; px < x + w - charW; px += charW) {
+      ctx.fillText('═', px, y)
+      ctx.fillText('═', px, y + h - charH)
+    }
+    for (let py = y + charH; py < y + h - charH; py += charH) {
+      ctx.fillText('║', x, py)
+      ctx.fillText('║', x + w - charW, py)
+    }
+    ctx.restore()
+  }
+
+  private drawSettingsSection(x: number, y: number, w: number, label: string): void {
+    const ctx = this.ctx
+    const labelBlock = this.renderer.getBlock(label, FONTS.hudSmall, 16)
+    this.renderer.drawBlock(ctx, labelBlock, x + 20, y, { color: COLORS.frameBright, align: 'left', alpha: 0.9 })
+
+    ctx.save()
+    ctx.globalAlpha = 0.3
+    ctx.strokeStyle = COLORS.frameBright
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(x + 20 + labelBlock.width + 12, y + 8)
+    ctx.lineTo(x + w - 20, y + 8)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  private drawSettingsPanel(): void {
+    const ctx = this.ctx
+    const cx = this.view.width / 2
+    const cy = this.view.height / 2
+    const pw = 720, ph = 480
+    const px = cx - pw / 2, py = cy - ph / 2
+
+    // 暗色遮罩
+    ctx.save()
+    ctx.fillStyle = 'rgba(4, 7, 13, 0.75)'
+    ctx.fillRect(0, 0, this.view.width, this.view.height)
+    ctx.restore()
+
+    // 面板背景
+    ctx.save()
+    ctx.fillStyle = 'rgba(8, 14, 28, 0.95)'
+    ctx.beginPath()
+    ctx.roundRect(px, py, pw, ph, 4)
+    ctx.fill()
+    ctx.restore()
+
+    // box-drawing 边框
+    this.drawPanelBorder(px, py, pw, ph)
+
+    // 标题
+    const titleBlock = this.renderer.getBlock('⚙  游戏设置', FONTS.prompt, 26)
+    this.renderer.drawBlock(ctx, titleBlock, cx, py + 30, {
+      color: COLORS.frameBright,
+      align: 'center',
+      shadow: true,
+      shadowColor: COLORS.frameBright,
+      shadowBlur: 12,
+    })
+
+    const innerX = px + 14
+    const innerW = pw - 28
+    let secY = py + 75
+
+    // ── 难度选择 ──
+    this.drawSettingsSection(innerX, secY, innerW, '难度选择')
+    secY += 30
+    this.difficultyBtnRects = []
+    const diffs: { key: 'easy' | 'normal' | 'hard'; label: string; color: string }[] = [
+      { key: 'easy', label: '简单·5命慢速', color: '#4be8a0' },
+      { key: 'normal', label: '普通·3命标准', color: '#7c9bff' },
+      { key: 'hard', label: '困难·2命快速', color: '#ff5555' },
+    ]
+    const dbW = 160, dbH = 36, dbGap = 20
+    const dbTotalW = diffs.length * dbW + (diffs.length - 1) * dbGap
+    const dbStartX = cx - dbTotalW / 2
+
+    for (let i = 0; i < diffs.length; i++) {
+      const d = diffs[i]!
+      const bx = dbStartX + i * (dbW + dbGap)
+      const selected = this.difficulty === d.key
+      const btnColor = selected ? d.color : COLORS.hud
+
+      ctx.save()
+      if (selected) {
+        ctx.globalAlpha = 0.25
+        ctx.fillStyle = d.color
+        ctx.shadowColor = d.color
+        ctx.shadowBlur = 12
+      } else {
+        ctx.globalAlpha = 0.08
+        ctx.fillStyle = COLORS.hud
+        ctx.shadowBlur = 0
+      }
+      ctx.beginPath()
+      ctx.roundRect(bx, secY, dbW, dbH, 6)
+      ctx.fill()
+
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = selected ? 0.9 : 0.4
+      ctx.strokeStyle = btnColor
+      ctx.lineWidth = selected ? 2.5 : 1
+      ctx.stroke()
+      ctx.restore()
+
+      const lblBlock = this.renderer.getBlock(d.label, FONTS.hudSmall, 16)
+      this.renderer.drawBlock(ctx, lblBlock, bx + dbW / 2, secY + 9, {
+        color: btnColor,
+        align: 'center',
+        alpha: selected ? 1 : 0.6,
+      })
+      this.difficultyBtnRects.push({ x: bx, y: secY, w: dbW, h: dbH, diff: d.key })
+    }
+
+    // ── 关卡选择 ──
+    secY += dbH + 24
+    this.drawSettingsSection(innerX, secY, innerW, '关卡选择')
+    secY += 30
+    this.levelBtnRects = []
+    const lvW = 110, lvH = 36, lvGap = 14
+    const levelLabels = ['基础', '动词', '形容词', '进阶', '高级']
+    const lvTotalW = LEVELS.length * lvW + (LEVELS.length - 1) * lvGap
+    const lvStartX = cx - lvTotalW / 2
+
+    for (let i = 0; i < LEVELS.length; i++) {
+      const bx = lvStartX + i * (lvW + lvGap)
+      const unlocked = i === 0 || this.progress.bestLevel >= i
+      const selected = this.selectedLevel === i
+
+      ctx.save()
+      if (selected && unlocked) {
+        ctx.globalAlpha = 0.25
+        ctx.fillStyle = COLORS.title
+        ctx.shadowColor = COLORS.title
+        ctx.shadowBlur = 10
+      } else {
+        ctx.globalAlpha = unlocked ? 0.1 : 0.04
         ctx.fillStyle = unlocked ? COLORS.title : COLORS.dim
-        ctx.beginPath()
-        ctx.roundRect(bx, btnY, btnW, btnH, 6)
-        ctx.fill()
+        ctx.shadowBlur = 0
+      }
+      ctx.beginPath()
+      ctx.roundRect(bx, secY, lvW, lvH, 6)
+      ctx.fill()
 
-        // 按钮边框
-        ctx.globalAlpha = alpha * 0.5
-        ctx.strokeStyle = unlocked ? COLORS.title : COLORS.dim
-        ctx.lineWidth = 1.5
-        ctx.stroke()
-        ctx.restore()
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = selected && unlocked ? 0.9 : unlocked ? 0.5 : 0.2
+      ctx.strokeStyle = unlocked ? COLORS.title : COLORS.dim
+      ctx.lineWidth = selected && unlocked ? 2.5 : 1
+      ctx.stroke()
+      ctx.restore()
 
-        // 按钮文字
-        const label = `L${i + 1} ${levelLabels[i]}`
-        const btnBlock = this.renderer.getBlock(label, FONTS.hudSmall, 16)
-        this.renderer.drawBlock(ctx, btnBlock, bx + btnW / 2, btnY + 8, {
-          color: unlocked ? COLORS.title : COLORS.dim,
-          align: 'center',
-          alpha,
-        })
+      const label = `L${i + 1} ${levelLabels[i]}`
+      const btnBlock = this.renderer.getBlock(label, FONTS.hudSmall, 16)
+      this.renderer.drawBlock(ctx, btnBlock, bx + lvW / 2, secY + 9, {
+        color: unlocked ? (selected ? COLORS.title : COLORS.hud) : COLORS.dim,
+        align: 'center',
+        alpha: unlocked ? (selected ? 1 : 0.7) : 0.3,
+      })
 
-        if (unlocked) {
-          this.levelBtnRects.push({ x: bx, y: btnY, w: btnW, h: btnH, level: i })
-        }
+      if (unlocked) {
+        this.levelBtnRects.push({ x: bx, y: secY, w: lvW, h: lvH, level: i })
       }
     }
 
-    // 历史记录（有记录时才显示）
+    // ── 操作说明 ──
+    secY += lvH + 24
+    this.drawSettingsSection(innerX, secY, innerW, '操作说明')
+    secY += 28
+    const helpStr = '← → / A D  移动挡板 · M 音效 · P 暂停 · F 全屏'
+    const helpBlock = this.renderer.getBlock(helpStr, FONTS.hudSmall, 15)
+    this.renderer.drawBlock(ctx, helpBlock, cx, secY, { color: COLORS.hud, align: 'center', alpha: 0.7 })
+
+    // ── 游戏记录 ──
+    secY += 34
+    this.drawSettingsSection(innerX, secY, innerW, '游戏记录')
+    secY += 28
     const p = this.progress
-    if (p.gamesPlayed > 0) {
-      const statsAlpha = easeOutCubic(clamp((this.gameTime - 1.5) / 0.4, 0, 1)) * 0.7
-      const statsY = cy + 340
-      const statsTexts = [
-        `最高分 ${p.highScore}`,
-        `已掌握 ${p.wordsLearned.length} 词`,
-        `最佳连击 ${p.bestCombo}`,
-        `游戏 ${p.gamesPlayed} 次`,
-      ]
-      const statsStr = statsTexts.join('  ·  ')
-      const statsBlock = this.renderer.getBlock(statsStr, FONTS.hudSmall, 16)
-      this.renderer.drawBlock(ctx, statsBlock, cx, statsY, {
-        color: COLORS.hudDim,
-        align: 'center',
-        alpha: statsAlpha,
-      })
-    }
+    const statsStr = p.gamesPlayed > 0
+      ? `最高分 ${p.highScore}  ·  已掌握 ${p.wordsLearned.length} 词  ·  最佳连击 ${p.bestCombo}`
+      : '暂无记录'
+    const statsBlock = this.renderer.getBlock(statsStr, FONTS.hudSmall, 15)
+    this.renderer.drawBlock(ctx, statsBlock, cx, secY, { color: COLORS.hudDim, align: 'center', alpha: 0.7 })
+
+    // ── 底部按钮 ──
+    const btnY = py + ph - 62
+
+    // ✕ 关闭
+    const clW = 120, clH = 40
+    const clX = cx - 100 - clW / 2
+    this.closeBtnRect = { x: clX, y: btnY, w: clW, h: clH }
+
+    ctx.save()
+    ctx.globalAlpha = 0.1
+    ctx.fillStyle = COLORS.hud
+    ctx.beginPath()
+    ctx.roundRect(clX, btnY, clW, clH, 6)
+    ctx.fill()
+    ctx.globalAlpha = 0.5
+    ctx.strokeStyle = COLORS.hud
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    ctx.restore()
+
+    const closeLabel = this.renderer.getBlock('✕  关闭', FONTS.hint, 18)
+    this.renderer.drawBlock(ctx, closeLabel, clX + clW / 2, btnY + 10, {
+      color: COLORS.hud,
+      align: 'center',
+      alpha: 0.8,
+    })
+
+    // ▶ 开始游戏
+    const goW = 180, goH = 40
+    const goX = cx + 100 - goW / 2
+    this.settingsStartBtnRect = { x: goX, y: btnY, w: goW, h: goH }
+
+    const goPulse = 0.8 + Math.sin(this.gameTime * 3) * 0.2
+    ctx.save()
+    ctx.globalAlpha = 0.2 * goPulse
+    ctx.fillStyle = COLORS.title
+    ctx.shadowColor = COLORS.title
+    ctx.shadowBlur = 14
+    ctx.beginPath()
+    ctx.roundRect(goX, btnY, goW, goH, 6)
+    ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.globalAlpha = 0.9
+    ctx.strokeStyle = COLORS.title
+    ctx.lineWidth = 2
+    ctx.stroke()
+    ctx.restore()
+
+    const goLabel = this.renderer.getBlock('▶  开始游戏', FONTS.prompt, 22)
+    this.renderer.drawBlock(ctx, goLabel, goX + goW / 2, btnY + 8, {
+      color: COLORS.title,
+      align: 'center',
+      shadow: true,
+      shadowColor: COLORS.title,
+      shadowBlur: 10,
+    })
   }
 
   private drawReviewScreen(): void {
